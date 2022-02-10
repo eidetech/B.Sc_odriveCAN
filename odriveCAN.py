@@ -2,18 +2,23 @@ import math
 import can
 import cantools
 import time
+from odrive.enums import *
 
 db = cantools.database.load_file("odrive-cansimple.dbc")
 # print(db)
 
 # bus = can.Bus("vcan0", bustype="virtual")
 bus = can.Bus("can0", bustype="socketcan")
-axisID = 0x00
+axisID_M0 = 0x00
+axisID_M1 = 0x01
 
-print("\nRequesting AXIS_STATE_FULL_CALIBRATION_SEQUENCE (0x03) on axisID: " + str(axisID))
+# Calibration sequence for M0 and M1
+print("\nRequesting AXIS_STATE_FULL_CALIBRATION_SEQUENCE (0x03) on axisID's: " + str(axisID_M0))
+
 msg = db.get_message_by_name('Set_Axis_State')
-data = msg.encode({'Axis_Requested_State': 0x03})
-msg = can.Message(arbitration_id=msg.frame_id | axisID << 5, is_extended_id=False, data=data)
+data = msg.encode({'Axis_Requested_State': AXIS_STATE_FULL_CALIBRATION_SEQUENCE})
+msg = can.Message(arbitration_id=msg.frame_id | axisID_M0 << 5, is_extended_id=False, data=data)
+
 print(db.decode_message('Set_Axis_State', msg.data))
 print(msg)
 
@@ -27,14 +32,14 @@ print("Waiting for calibration to finish...")
 # Read messages infinitely and wait for the right ID to show up
 while True:
     msg = bus.recv()
-    if msg.arbitration_id == ((axisID << 5) | db.get_message_by_name('Heartbeat').frame_id):
+    if msg.arbitration_id == ((axisID_M0 << 5) | db.get_message_by_name('Heartbeat').frame_id):
         current_state = db.decode_message('Heartbeat', msg.data)['Axis_State']
         if current_state == 0x1:
             print("\nAxis has returned to Idle state.")
             break
 
 for msg in bus:
-    if msg.arbitration_id == ((axisID << 5) | db.get_message_by_name('Heartbeat').frame_id):
+    if msg.arbitration_id == ((axisID_M0 << 5) | db.get_message_by_name('Heartbeat').frame_id):
         errorCode = db.decode_message('Heartbeat', msg.data)['Axis_Error']
         if errorCode == 0x00:
             print("No errors")
@@ -42,9 +47,9 @@ for msg in bus:
             print("Axis error!  Error code: "+str(hex(errorCode)))
         break
 
-print("\nPutting axis",axisID,"into AXIS_STATE_CLOSED_LOOP_CONTROL (0x08)...")
+print("\nPutting axis",axisID_M0,"into AXIS_STATE_CLOSED_LOOP_CONTROL (0x08)...")
 data = db.encode_message('Set_Axis_State', {'Axis_Requested_State': 0x08})
-msg = can.Message(arbitration_id=0x07 | axisID << 5, is_extended_id=False, data=data)
+msg = can.Message(arbitration_id=0x07 | axisID_M0 << 5, is_extended_id=False, data=data)
 print(msg)
 
 try:
@@ -54,7 +59,7 @@ except can.CanError:
     print("Message NOT sent!")
 
 for msg in bus:
-    if msg.arbitration_id == 0x01 | axisID << 5:
+    if msg.arbitration_id == 0x01 | axisID_M0 << 5:
         print("\nReceived Axis heartbeat message:")
         msg = db.decode_message('Heartbeat', msg.data)
         print(msg)
@@ -66,8 +71,8 @@ for msg in bus:
 
 target = 0
 
-data = db.encode_message('Set_Limits', {'Velocity_Limit':10.0, 'Current_Limit':10.0})
-msg = can.Message(arbitration_id=axisID << 5 | 0x00F, is_extended_id=False, data=data)
+data = db.encode_message('Set_Limits', {'Velocity_Limit':4.0, 'Current_Limit':10.0})
+msg = can.Message(arbitration_id=axisID_M0 << 5 | 0x00F, is_extended_id=False, data=data)
 bus.send(msg)
 
 t0 = time.monotonic()
@@ -75,6 +80,6 @@ while True:
     setpoint = 4.0 * math.sin((time.monotonic() - t0)*2)
     print("goto " + str(setpoint))
     data = db.encode_message('Set_Input_Pos', {'Input_Pos':setpoint, 'Vel_FF':0.0, 'Torque_FF':0.0})
-    msg = can.Message(arbitration_id=axisID << 5 | 0x00C, data=data, is_extended_id=False)
+    msg = can.Message(arbitration_id=axisID_M0 << 5 | 0x00C, data=data, is_extended_id=False)
     bus.send(msg)
     time.sleep(0.01)
